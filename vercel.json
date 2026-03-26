@@ -1,6 +1,20 @@
 {
-  "crons": [{
-    "path": "/api/cron",
-    "schedule": "0 10 * * *"
-  }]
+  "crons": [
+    {
+      "path": "/api/cron?job=morning",
+      "schedule": "0 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron?job=social",
+      "schedule": "0 10 * * 1-5"
+    },
+    {
+      "path": "/api/cron?job=afternoon",
+      "schedule": "0 14 * * 1-5"
+    },
+    {
+      "path": "/api/cron?job=cleanup",
+      "schedule": "0 3 * * 0"
+    }
+  ]
 }

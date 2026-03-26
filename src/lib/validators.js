@@ -163,17 +163,22 @@ export function validateCronSecret(secret) {
 }
 
 /**
- * Validate webhook signature (if implemented)
+ * Validate webhook signature
+ * Telegram sends the secret_token as the X-Telegram-Bot-Api-Secret-Token header.
+ * We compare it against the configured webhook secret.
  */
 export function validateWebhookSignature(signature, body) {
-  // TODO: Implement proper webhook signature validation
-  // This would typically involve HMAC verification
   if (!config.telegram.webhookSecret) {
     return true; // Skip validation if no secret configured
   }
-  
-  // Placeholder for actual implementation
-  return true;
+
+  if (!signature) {
+    return false; // Secret is configured but header is missing
+  }
+
+  // Telegram uses a simple secret token comparison (not HMAC)
+  // The secret_token we set via setWebhook is sent back as-is in the header
+  return signature === config.telegram.webhookSecret;
 }
 
 /**

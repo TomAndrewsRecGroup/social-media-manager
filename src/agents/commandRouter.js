@@ -9,6 +9,8 @@ import { sanitizeInput } from '../lib/validators.js';
 import SocialWorkflow from '../workflows/social.js';
 import SystemCommands from '../commands/system.js';
 import ContentCommands from '../commands/content.js';
+import StorageService, { STORAGE_KEYS } from '../services/storage.js';
+import BusinessTaskAgent from './businessTaskAgent.js';
 
 const log = logger.child('CommandRouter');
 
@@ -17,6 +19,8 @@ class CommandRouter {
     this.socialWorkflow = new SocialWorkflow();
     this.systemCommands = new SystemCommands();
     this.contentCommands = new ContentCommands();
+    this.storage = new StorageService();
+    this.businessTaskAgent = new BusinessTaskAgent();
     
     // Command mapping
     this.commands = {
@@ -41,6 +45,8 @@ class CommandRouter {
       // Admin commands
       'test': this.handleTest.bind(this),
       'logs': this.handleLogs.bind(this),
+      'tasks': this.handleTasks.bind(this),
+      'research': this.handleResearch.bind(this),
     };
     
     // Callback handlers
@@ -98,9 +104,22 @@ class CommandRouter {
   async routeConversational({ text, userId, chatId }) {
     try {
       const cleanText = sanitizeInput(text);
-      
+
       log.info('Processing conversational message', { userId, preview: cleanText.substring(0, 50) });
-      
+
+      // Check if we're awaiting an edit
+      const awaitingEdit = await this.storage.get('awaiting_edit');
+      if (awaitingEdit && awaitingEdit.chatId === chatId) {
+        await this.storage.delete('awaiting_edit');
+        const editResult = await this.contentCommands.editDraft(awaitingEdit.postId, cleanText);
+        return {
+          success: true,
+          message: editResult.success
+            ? '✅ Draft updated with your new content.'
+            : `❌ Failed to update draft: ${editResult.error}`,
+        };
+      }
+
       // Analyze intent
       const intent = await this.analyzeIntent(cleanText);
       
@@ -327,9 +346,43 @@ class CommandRouter {
   }
 
   async handleHelp({ userId, chatId }) {
+    const helpText = `🤖 *IvyLens Social Operator*
+
+*Social Media Commands:*
+/run — Run the full social media workflow now
+/run linkedin — Run for a specific platform
+/schedule — View the posting schedule
+/pause — Pause automatic posting
+/resume — Resume automatic posting
+
+*Content Commands:*
+/ideas [topic] — Generate post ideas
+/draft [topic] — Create a draft post
+/preview — Preview scheduled/draft posts
+
+*System Commands:*
+/status — View system status
+/mode — View or change operating mode
+/mode auto|draft|approval — Set mode
+/platforms — View platform status
+/logs — View recent activity
+/test — Run a system test
+
+*Business Tasks:*
+/tasks — View all business capabilities
+/research [topic] — Research a specific topic
+
+*Conversational:*
+You can also send plain text requests like:
+• "Run today's LinkedIn post"
+• "Give me 5 ideas about salary inflation"
+• "What posted today?"
+
+Type any command to get started.`;
+
     return {
       success: true,
-      message: 'Here are the available commands:',
+      message: helpText,
       options: {
         parse_mode: 'Markdown',
       },
@@ -356,6 +409,32 @@ class CommandRouter {
     return {
       success: true,
       message: logs,
+    };
+  }
+
+  async handleTasks({ userId, chatId }) {
+    const message = this.businessTaskAgent.getCapabilitiesMessage();
+    return {
+      success: true,
+      message,
+    };
+  }
+
+  async handleResearch({ args, userId, chatId }) {
+    const topic = args.join(' ');
+
+    if (!topic) {
+      return {
+        success: false,
+        error: 'Please provide a topic. Example: /research salary inflation UK engineering',
+      };
+    }
+
+    const result = await this.businessTaskAgent.execute('research.topic', { topic });
+
+    return {
+      success: result.success,
+      message: result.message,
     };
   }
 
@@ -396,38 +475,87 @@ class CommandRouter {
 
   async handleApprovalCallback({ data, userId, chatId }) {
     const postId = data;
-    
-    // TODO: Implement post approval logic
-    
-    return {
-      notification: 'Post approved',
-      updateMessage: true,
-      message: '✅ Post approved and scheduled for publishing',
-    };
+
+    try {
+      const result = await this.contentCommands.approvePost(postId);
+
+      if (result.success) {
+        return {
+          notification: 'Post approved',
+          updateMessage: true,
+          message: `✅ ${result.message}`,
+        };
+      } else {
+        return {
+          notification: 'Approval failed',
+          updateMessage: true,
+          message: `❌ Failed to approve: ${result.error}`,
+        };
+      }
+    } catch (error) {
+      log.error('Approval callback error', error);
+      return {
+        notification: 'Error',
+        updateMessage: true,
+        message: '❌ Failed to process approval. Please try again.',
+      };
+    }
   }
 
   async handleEditCallback({ data, userId, chatId }) {
     const postId = data;
-    
-    // TODO: Implement post editing logic
-    
-    return {
-      notification: 'Edit mode',
-      updateMessage: true,
-      message: '✏️ Please send the edited version of the post',
-    };
+
+    try {
+      // Store the post ID awaiting edit so next message is treated as the edited content
+      await this.storage.set('awaiting_edit', {
+        postId,
+        chatId,
+        userId,
+        requestedAt: new Date().toISOString(),
+      });
+
+      return {
+        notification: 'Edit mode activated',
+        updateMessage: true,
+        message: `✏️ *Edit Mode*\n\nSend the edited version of the post now.\nThe next message you send will replace the current draft.\n\nPost ID: \`${postId}\``,
+      };
+    } catch (error) {
+      log.error('Edit callback error', error);
+      return {
+        notification: 'Error',
+        updateMessage: true,
+        message: '❌ Failed to enter edit mode. Please try again.',
+      };
+    }
   }
 
   async handleRejectCallback({ data, userId, chatId }) {
     const postId = data;
-    
-    // TODO: Implement post rejection logic
-    
-    return {
-      notification: 'Post rejected',
-      updateMessage: true,
-      message: '❌ Post rejected and will not be published',
-    };
+
+    try {
+      const result = await this.contentCommands.rejectPost(postId);
+
+      if (result.success) {
+        return {
+          notification: 'Post rejected',
+          updateMessage: true,
+          message: '❌ Post rejected and removed from the queue.',
+        };
+      } else {
+        return {
+          notification: 'Rejection failed',
+          updateMessage: true,
+          message: `❌ Failed to reject: ${result.error}`,
+        };
+      }
+    } catch (error) {
+      log.error('Reject callback error', error);
+      return {
+        notification: 'Error',
+        updateMessage: true,
+        message: '❌ Failed to process rejection. Please try again.',
+      };
+    }
   }
 
   // Conversational Handlers
@@ -456,7 +584,7 @@ class CommandRouter {
   async handleTaskRequest(intent, chatId) {
     return {
       success: true,
-      message: "I can execute these tasks:\n\n• Run social media workflow (/run)\n• Generate content ideas (/ideas)\n• Create draft posts (/draft)\n• Pause/resume automation (/pause, /resume)\n\nWhich task should I perform?",
+      message: "I can execute these tasks:\n\n*Social:*\n• /run — Run social media workflow\n• /ideas — Generate content ideas\n• /draft — Create draft posts\n• /pause / /resume — Control automation\n\n*Business:*\n• /tasks — View all capabilities\n• /research [topic] — Research a topic\n\nWhich task should I perform?",
     };
   }
 }

@@ -3,6 +3,7 @@
  * Vercel serverless function handler
  */
 
+import config from '../src/config/index.js';
 import logger from '../src/lib/logger.js';
 
 /**
@@ -10,13 +11,12 @@ import logger from '../src/lib/logger.js';
  */
 export default async function handler(req, res) {
   const { method, url } = req;
-  
+
   logger.info('API Request', {
     method,
     url,
-    headers: req.headers,
   });
-  
+
   // Health check endpoint
   if (url === '/api' || url === '/api/health') {
     return res.status(200).json({
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString(),
     });
   }
-  
+
   // Route to appropriate handler based on path
   try {
     // Telegram webhook will be at /api/telegram
@@ -34,28 +34,30 @@ export default async function handler(req, res) {
       const telegramHandler = await import('./telegram/index.js');
       return telegramHandler.default(req, res);
     }
-    
+
     // Cron endpoints will be at /api/cron
     if (url.startsWith('/api/cron')) {
       const cronHandler = await import('./cron/index.js');
       return cronHandler.default(req, res);
     }
-    
+
     // System status endpoint
     if (url === '/api/status') {
-      const statusHandler = await import('./system/status.js');
-      return statusHandler.default(req, res);
+      const SystemCommands = (await import('../src/commands/system.js')).default;
+      const systemCommands = new SystemCommands();
+      const status = await systemCommands.getSystemStatus();
+      return res.status(200).json({ status });
     }
-    
+
     // 404 for unmatched routes
     return res.status(404).json({
       error: 'Not Found',
       message: 'The requested endpoint does not exist',
     });
-    
+
   } catch (error) {
     logger.error('API Handler Error', error);
-    
+
     return res.status(500).json({
       error: 'Internal Server Error',
       message: config.isDevelopment ? error.message : 'An error occurred processing your request',
