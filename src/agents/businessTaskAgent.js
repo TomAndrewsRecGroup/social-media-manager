@@ -14,12 +14,19 @@
 
 import logger from '../lib/logger.js';
 import StorageService, { STORAGE_KEYS } from '../services/storage.js';
+import OutreachService from '../services/outreach.js';
+import JobAdGenerator from '../services/jobAdGenerator.js';
+import ATSService from '../services/ats.js';
+import brandManager from '../config/brands.js';
 
 const log = logger.child('BusinessTaskAgent');
 
 class BusinessTaskAgent {
   constructor() {
     this.storage = new StorageService();
+    this.outreach = new OutreachService();
+    this.jobAdGenerator = new JobAdGenerator();
+    this.ats = new ATSService();
 
     // Registry of task capabilities
     // Each key is a dot-separated capability name
@@ -34,36 +41,77 @@ class BusinessTaskAgent {
    * Register default task capabilities (placeholders for future implementation)
    */
   registerDefaults() {
-    this.register('email.reply', {
-      description: 'Draft or send an email reply in Tom\'s tone',
-      enabled: false,
-      handler: this.notYetEnabled,
+    // --- Outreach ---
+    this.register('outreach.candidate', {
+      description: 'Draft a candidate outreach message (LinkedIn/email)',
+      enabled: true,
+      handler: this.handleCandidateOutreach.bind(this),
     });
 
-    this.register('email.search', {
-      description: 'Search emails by sender, subject, or keyword',
-      enabled: false,
-      handler: this.notYetEnabled,
+    this.register('outreach.client', {
+      description: 'Draft a client/BD outreach message',
+      enabled: true,
+      handler: this.handleClientOutreach.bind(this),
     });
 
-    this.register('report.generate', {
-      description: 'Generate a business or performance report',
-      enabled: false,
-      handler: this.notYetEnabled,
+    this.register('outreach.followup', {
+      description: 'Draft a follow-up message for a candidate or client',
+      enabled: true,
+      handler: this.handleFollowUp.bind(this),
     });
 
-    this.register('browser.open', {
-      description: 'Open a URL in a headless browser',
-      enabled: false,
-      handler: this.notYetEnabled,
+    // --- Job Ads ---
+    this.register('jobad.generate', {
+      description: 'Generate a full job ad from a brief',
+      enabled: true,
+      handler: this.handleJobAdGenerate.bind(this),
     });
 
-    this.register('browser.navigate', {
-      description: 'Navigate and interact with a web page',
-      enabled: false,
-      handler: this.notYetEnabled,
+    this.register('jobad.variants', {
+      description: 'Generate job ad in multiple formats (full, LinkedIn, short)',
+      enabled: true,
+      handler: this.handleJobAdVariants.bind(this),
     });
 
+    // --- ATS ---
+    this.register('ats.candidates', {
+      description: 'Search or list candidates in the ATS',
+      enabled: true,
+      handler: this.handleATSCandidates.bind(this),
+    });
+
+    this.register('ats.jobs', {
+      description: 'List active jobs from the ATS',
+      enabled: true,
+      handler: this.handleATSJobs.bind(this),
+    });
+
+    this.register('ats.pipeline', {
+      description: 'Get pipeline summary from the ATS',
+      enabled: true,
+      handler: this.handleATSPipeline.bind(this),
+    });
+
+    this.register('ats.clients', {
+      description: 'List client organisations from the ATS',
+      enabled: true,
+      handler: this.handleATSClients.bind(this),
+    });
+
+    // --- Brand ---
+    this.register('brand.info', {
+      description: 'View active brand configuration',
+      enabled: true,
+      handler: this.handleBrandInfo.bind(this),
+    });
+
+    this.register('brand.list', {
+      description: 'List all registered brands',
+      enabled: true,
+      handler: this.handleBrandList.bind(this),
+    });
+
+    // --- System ---
     this.register('system.status', {
       description: 'Get system health and status information',
       enabled: true,
@@ -80,6 +128,31 @@ class BusinessTaskAgent {
       description: 'Research a specific topic using Tavily',
       enabled: true,
       handler: this.handleResearchTopic.bind(this),
+    });
+
+    // --- Future placeholders ---
+    this.register('email.reply', {
+      description: 'Draft or send an email reply in Tom\'s tone',
+      enabled: false,
+      handler: this.notYetEnabled,
+    });
+
+    this.register('email.search', {
+      description: 'Search emails by sender, subject, or keyword',
+      enabled: false,
+      handler: this.notYetEnabled,
+    });
+
+    this.register('browser.open', {
+      description: 'Open a URL in a headless browser',
+      enabled: false,
+      handler: this.notYetEnabled,
+    });
+
+    this.register('report.generate', {
+      description: 'Generate a business or performance report',
+      enabled: false,
+      handler: this.notYetEnabled,
     });
   }
 
@@ -201,6 +274,154 @@ class BusinessTaskAgent {
     }
 
     return message;
+  }
+
+  // --- Outreach handlers ---
+
+  async handleCandidateOutreach(params) {
+    if (params.rawText) {
+      const parsed = this.outreach.parseOutreachRequest(params.rawText);
+      params = { ...parsed.params, channel: parsed.channel, ...params };
+    }
+    const result = await this.outreach.draftCandidateOutreach(params);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    return {
+      success: true,
+      message: `✉️ *Candidate Outreach Draft*\n_(${params.channel || 'linkedin'})_\n\n${result.message}`,
+    };
+  }
+
+  async handleClientOutreach(params) {
+    if (params.rawText) {
+      const parsed = this.outreach.parseOutreachRequest(params.rawText);
+      params = { ...parsed.params, channel: parsed.channel, purpose: parsed.purpose || 'introduction', ...params };
+    }
+    const result = await this.outreach.draftClientOutreach(params);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    return {
+      success: true,
+      message: `✉️ *Client Outreach Draft*\n_(${params.purpose || 'introduction'} via ${params.channel || 'email'})_\n\n${result.message}`,
+    };
+  }
+
+  async handleFollowUp(params) {
+    const result = await this.outreach.draftFollowUp(params);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    return {
+      success: true,
+      message: `🔄 *Follow-Up Draft*\n\n${result.message}`,
+    };
+  }
+
+  // --- Job Ad handlers ---
+
+  async handleJobAdGenerate(params) {
+    if (params.rawText) {
+      const parsed = this.jobAdGenerator.parseJobAdRequest(params.rawText);
+      params = { ...parsed, ...params };
+    }
+    const result = await this.jobAdGenerator.generateJobAd(params);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    return {
+      success: true,
+      message: `📋 *Job Ad — ${params.jobTitle || 'Generated'}*\n_(${params.format || 'full'} format)_\n\n${result.message}`,
+    };
+  }
+
+  async handleJobAdVariants(params) {
+    if (params.rawText) {
+      const parsed = this.jobAdGenerator.parseJobAdRequest(params.rawText);
+      params = { ...parsed, ...params };
+    }
+    const result = await this.jobAdGenerator.generateVariants(params);
+    if (!result.success) return { success: false, message: '❌ Failed to generate variants' };
+
+    let message = `📋 *Job Ad Variants — ${params.jobTitle || 'Generated'}*\n\n`;
+    for (const [format, content] of Object.entries(result.variants)) {
+      message += `━━━ *${format.toUpperCase()}* ━━━\n${content.substring(0, 500)}${content.length > 500 ? '...' : ''}\n\n`;
+    }
+    return { success: true, message };
+  }
+
+  // --- ATS handlers ---
+
+  async handleATSCandidates(params) {
+    if (!this.ats.isConfigured()) {
+      return { success: false, message: '⚠️ ATS not configured. Set MANATAL_API_KEY in environment.' };
+    }
+    const result = await this.ats.listCandidates(params);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    return {
+      success: true,
+      message: this.ats.formatCandidatesForTelegram(result.candidates, result.total),
+      data: result.candidates,
+    };
+  }
+
+  async handleATSJobs(params) {
+    if (!this.ats.isConfigured()) {
+      return { success: false, message: '⚠️ ATS not configured. Set MANATAL_API_KEY in environment.' };
+    }
+    const filters = { status: 'active', ...params };
+    const result = await this.ats.listJobs(filters);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    return {
+      success: true,
+      message: this.ats.formatJobsForTelegram(result.jobs, result.total),
+      data: result.jobs,
+    };
+  }
+
+  async handleATSPipeline(params) {
+    if (!this.ats.isConfigured()) {
+      return { success: false, message: '⚠️ ATS not configured. Set MANATAL_API_KEY in environment.' };
+    }
+    return await this.ats.getPipelineSummary();
+  }
+
+  async handleATSClients(params) {
+    if (!this.ats.isConfigured()) {
+      return { success: false, message: '⚠️ ATS not configured. Set MANATAL_API_KEY in environment.' };
+    }
+    const result = await this.ats.listOrganisations(params);
+    if (!result.success) return { success: false, message: `❌ ${result.error}` };
+
+    if (!result.organisations?.length) {
+      return { success: true, message: '📭 No client organisations found.' };
+    }
+
+    let message = `🏢 *Client Organisations* (${result.total} total)\n\n`;
+    for (const org of result.organisations) {
+      message += `*${org.name}*\n`;
+      if (org.website) message += `  🌐 ${org.website}\n`;
+      if (org.address) message += `  📍 ${org.address}\n`;
+      message += '\n';
+    }
+    return { success: true, message, data: result.organisations };
+  }
+
+  // --- Brand handlers ---
+
+  async handleBrandInfo(params) {
+    return { success: true, message: brandManager.getActiveBrandInfo() };
+  }
+
+  async handleBrandList(params) {
+    const brands = brandManager.listBrands();
+    let message = '🏷️ *Registered Brands*\n\n';
+    for (const b of brands) {
+      const isActive = b.slug === brandManager.activeBrandSlug ? ' ✅' : '';
+      message += `*${b.name}*${isActive}\n`;
+      message += `  Slug: ${b.slug} | Owner: ${b.owner}\n`;
+      message += `  Sectors: ${b.sectors} | Platforms: ${b.platforms}\n\n`;
+    }
+    return { success: true, message };
   }
 
   // --- Built-in handlers ---

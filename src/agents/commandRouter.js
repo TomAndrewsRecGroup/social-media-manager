@@ -42,6 +42,19 @@ class CommandRouter {
       'help': this.handleHelp.bind(this),
       'start': this.handleStart.bind(this),
       
+      // Outreach & job ads
+      'outreach': this.handleOutreach.bind(this),
+      'jobad': this.handleJobAd.bind(this),
+
+      // ATS commands
+      'candidates': this.handleCandidates.bind(this),
+      'jobs': this.handleJobs.bind(this),
+      'pipeline': this.handlePipeline.bind(this),
+      'clients': this.handleClients.bind(this),
+
+      // Brand
+      'brand': this.handleBrand.bind(this),
+
       // Admin commands
       'test': this.handleTest.bind(this),
       'logs': this.handleLogs.bind(this),
@@ -368,9 +381,20 @@ class CommandRouter {
 /logs — View recent activity
 /test — Run a system test
 
+*Outreach & Job Ads:*
+/outreach [brief] — Draft outreach message (candidate/client)
+/jobad [brief] — Generate a job ad from a brief
+
+*ATS (Manatal):*
+/candidates [name] — Search candidates
+/jobs — List active jobs
+/pipeline — Pipeline summary
+/clients [name] — List client organisations
+
 *Business Tasks:*
 /tasks — View all business capabilities
 /research [topic] — Research a specific topic
+/brand — View active brand config
 
 *Conversational:*
 You can also send plain text requests like:
@@ -435,6 +459,122 @@ Type any command to get started.`;
     return {
       success: result.success,
       message: result.message,
+    };
+  }
+
+  // --- Outreach & Job Ad Handlers ---
+
+  async handleOutreach({ args, userId, chatId }) {
+    const text = args.join(' ');
+    if (!text) {
+      return {
+        success: false,
+        error: 'Usage: /outreach [description]\n\nExamples:\n• /outreach candidate for a site manager role in aggregates, £55k, Midlands\n• /outreach client introduction to ABC Construction about engineering hiring\n• /outreach follow up with James about the estimator role',
+      };
+    }
+
+    const parsed = this.businessTaskAgent.outreach.parseOutreachRequest(text);
+    let taskName;
+
+    if (parsed.purpose === 'follow-up') {
+      taskName = 'outreach.followup';
+    } else if (parsed.type === 'client') {
+      taskName = 'outreach.client';
+    } else {
+      taskName = 'outreach.candidate';
+    }
+
+    const result = await this.businessTaskAgent.execute(taskName, {
+      ...parsed.params,
+      channel: parsed.channel,
+      purpose: parsed.purpose,
+      rawText: text,
+    });
+
+    return { success: result.success, message: result.message };
+  }
+
+  async handleJobAd({ args, userId, chatId }) {
+    const text = args.join(' ');
+    if (!text) {
+      return {
+        success: false,
+        error: 'Usage: /jobad [description]\n\nExamples:\n• /jobad Mechanical Estimator, M&E, London, £60-70k\n• /jobad Site Manager for aggregates company in Midlands £55k\n• /jobad linkedin format - Quarry Manager, £50-60k, South Wales',
+      };
+    }
+
+    const result = await this.businessTaskAgent.execute('jobad.generate', { rawText: text });
+    return { success: result.success, message: result.message };
+  }
+
+  // --- ATS Handlers ---
+
+  async handleCandidates({ args, userId, chatId }) {
+    const filters = {};
+    const text = args.join(' ');
+
+    if (text) {
+      // Check for name search vs position search
+      if (text.toLowerCase().includes('position:') || text.toLowerCase().includes('role:')) {
+        filters.position = text.replace(/position:|role:/i, '').trim();
+      } else if (text.toLowerCase().includes('company:')) {
+        filters.company = text.replace(/company:/i, '').trim();
+      } else {
+        filters.name = text;
+      }
+    }
+
+    const result = await this.businessTaskAgent.execute('ats.candidates', filters);
+    return { success: result.success, message: result.message };
+  }
+
+  async handleJobs({ args, userId, chatId }) {
+    const filters = {};
+    const text = args.join(' ');
+
+    if (text) {
+      if (text.toLowerCase().includes('all')) {
+        // Don't filter by status
+      } else {
+        filters.position = text;
+      }
+    }
+
+    const result = await this.businessTaskAgent.execute('ats.jobs', filters);
+    return { success: result.success, message: result.message };
+  }
+
+  async handlePipeline({ args, userId, chatId }) {
+    const result = await this.businessTaskAgent.execute('ats.pipeline', {});
+    return { success: result.success, message: result.message };
+  }
+
+  async handleClients({ args, userId, chatId }) {
+    const filters = {};
+    if (args.length > 0) {
+      filters.name = args.join(' ');
+    }
+
+    const result = await this.businessTaskAgent.execute('ats.clients', filters);
+    return { success: result.success, message: result.message };
+  }
+
+  // --- Brand Handler ---
+
+  async handleBrand({ args, userId, chatId }) {
+    if (args.length === 0 || args[0] === 'info') {
+      const result = await this.businessTaskAgent.execute('brand.info', {});
+      return { success: true, message: result.message };
+    }
+
+    if (args[0] === 'list') {
+      const result = await this.businessTaskAgent.execute('brand.list', {});
+      return { success: true, message: result.message };
+    }
+
+    return {
+      success: true,
+      message: '*Brand Commands:*\n\n/brand — View active brand\n/brand list — List all brands\n/brand info — Brand details',
     };
   }
 
