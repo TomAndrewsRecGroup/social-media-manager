@@ -102,9 +102,10 @@ class TavilyService {
    */
   async researchSectorTrends(sectors = config.content.sectors) {
     const results = [];
-    
+    const currentYear = new Date().getFullYear();
+
     for (const sector of sectors) {
-      const query = `${sector} hiring trends UK 2024 2025 recruitment challenges`;
+      const query = `${sector} hiring trends UK ${currentYear} recruitment challenges`;
       
       log.info(`Researching sector: ${sector}`);
       
@@ -128,18 +129,20 @@ class TavilyService {
    * Build recruitment-focused search queries
    */
   buildRecruitmentQueries(options = {}) {
+    const currentYear = new Date().getFullYear();
+
     const baseQueries = [
-      'UK recruitment trends 2024 2025',
+      `UK recruitment trends ${currentYear}`,
       'UK hiring challenges shortage',
       'UK salary inflation recruitment',
       'UK skills gap engineering construction',
       'UK candidate shortage recruitment',
       'UK job market trends hiring',
     ];
-    
+
     const focusAreas = options.focusAreas || config.content.focusAreas;
-    const focusQueries = focusAreas.slice(0, 3).map(area => 
-      `UK recruitment ${area} 2024 trends`
+    const focusQueries = focusAreas.slice(0, 3).map(area =>
+      `UK recruitment ${area} ${currentYear} trends`
     );
     
     return [...baseQueries, ...focusQueries];

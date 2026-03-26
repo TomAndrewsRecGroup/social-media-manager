@@ -8,7 +8,7 @@ import logger from '../../src/lib/logger.js';
 import { validateCronSecret } from '../../src/lib/validators.js';
 import SocialWorkflow from '../../src/workflows/social.js';
 import TelegramService from '../../src/services/telegram.js';
-import StorageService from '../../src/services/storage.js';
+import StorageService, { STORAGE_KEYS } from '../../src/services/storage.js';
 
 const log = logger.child('CronHandler');
 const telegram = new TelegramService();
@@ -105,7 +105,7 @@ async function runSocialWorkflow() {
   log.workflowStart('Scheduled Social Workflow');
   
   // Check if automation is paused
-  const isPaused = await storage.get('automation_paused');
+  const isPaused = await storage.get(STORAGE_KEYS.AUTOMATION_PAUSED);
   if (isPaused) {
     log.info('Automation is paused, skipping workflow');
     return {
@@ -118,7 +118,7 @@ async function runSocialWorkflow() {
   const result = await workflow.executeScheduled();
   
   // Store last run time
-  await storage.set('last_social_run', {
+  await storage.set(STORAGE_KEYS.LAST_SOCIAL_RUN, {
     timestamp: new Date().toISOString(),
     success: result.success,
     stats: result.stats,
@@ -133,7 +133,7 @@ async function runSocialWorkflow() {
 async function runMorningWorkflow() {
   log.workflowStart('Morning Workflow');
   
-  const isPaused = await storage.get('automation_paused');
+  const isPaused = await storage.get(STORAGE_KEYS.AUTOMATION_PAUSED);
   if (isPaused) {
     return {
       skipped: true,
@@ -152,7 +152,7 @@ async function runMorningWorkflow() {
   });
   
   // Store morning run
-  await storage.set('last_morning_run', {
+  await storage.set(STORAGE_KEYS.LAST_MORNING_RUN, {
     timestamp: new Date().toISOString(),
     success: result.success,
     drafts: result.drafts?.length || 0,
@@ -167,7 +167,7 @@ async function runMorningWorkflow() {
 async function runAfternoonWorkflow() {
   log.workflowStart('Afternoon Workflow');
   
-  const isPaused = await storage.get('automation_paused');
+  const isPaused = await storage.get(STORAGE_KEYS.AUTOMATION_PAUSED);
   if (isPaused) {
     return {
       skipped: true,
@@ -176,7 +176,7 @@ async function runAfternoonWorkflow() {
   }
   
   // Get morning drafts
-  const drafts = await storage.get('drafts');
+  const drafts = await storage.get(STORAGE_KEYS.DRAFTS);
   
   if (!drafts || drafts.length === 0) {
     log.info('No drafts to publish');
@@ -202,7 +202,7 @@ async function runAfternoonWorkflow() {
   
   // Clear published drafts
   if (result.success) {
-    await storage.set('drafts', []);
+    await storage.set(STORAGE_KEYS.DRAFTS, []);
   }
   
   // Notify via Telegram
@@ -271,24 +271,24 @@ async function runCleanup() {
   let cleaned = 0;
   
   // Clean old workflows
-  const workflows = await storage.get('recent_workflows') || [];
-  const recentWorkflows = workflows.filter(w => 
+  const workflows = await storage.get(STORAGE_KEYS.RECENT_WORKFLOWS) || [];
+  const recentWorkflows = workflows.filter(w =>
     new Date(w.timestamp).getTime() > sevenDaysAgo
   );
-  
+
   if (recentWorkflows.length < workflows.length) {
-    await storage.set('recent_workflows', recentWorkflows);
+    await storage.set(STORAGE_KEYS.RECENT_WORKFLOWS, recentWorkflows);
     cleaned += workflows.length - recentWorkflows.length;
   }
-  
+
   // Clean old topics
-  const topics = await storage.get('recent_topics') || [];
-  const recentTopics = topics.filter(t => 
+  const topics = await storage.get(STORAGE_KEYS.RECENT_TOPICS) || [];
+  const recentTopics = topics.filter(t =>
     new Date(t.selectedAt).getTime() > sevenDaysAgo
   );
-  
+
   if (recentTopics.length < topics.length) {
-    await storage.set('recent_topics', recentTopics);
+    await storage.set(STORAGE_KEYS.RECENT_TOPICS, recentTopics);
     cleaned += topics.length - recentTopics.length;
   }
   

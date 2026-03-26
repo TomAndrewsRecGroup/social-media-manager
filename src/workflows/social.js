@@ -11,7 +11,7 @@ import GroqService from '../services/groq.js';
 import PlatformFormatter from '../agents/platformFormatter.js';
 import PostFastService from '../services/postfast.js';
 import TelegramService from '../services/telegram.js';
-import StorageService from '../services/storage.js';
+import StorageService, { STORAGE_KEYS, StorageUtils } from '../services/storage.js';
 
 const log = logger.child('SocialWorkflow');
 
@@ -34,12 +34,16 @@ class SocialWorkflow {
     const workflowId = `workflow_${Date.now()}`;
     const startTime = new Date();
     
+    // Resolve operating mode: explicit option > stored setting > config default
+    const storedMode = await this.storage.get(STORAGE_KEYS.CURRENT_MODE);
+    const resolvedMode = options.mode || storedMode || config.modes.default;
+
     log.workflowStart('Social Media Workflow', {
       workflowId,
-      mode: options.mode || config.modes.default,
+      mode: resolvedMode,
       platforms: options.platforms || ['all'],
     });
-    
+
     try {
       // Step 1: Research trending topics
       const researchResult = await this.researchPhase(options);
@@ -82,7 +86,7 @@ class SocialWorkflow {
       
       // Step 5: Handle based on mode
       let publishResult;
-      const mode = options.mode || config.modes.default;
+      const mode = resolvedMode;
       
       switch (mode) {
         case 'auto':
@@ -277,7 +281,29 @@ class SocialWorkflow {
       };
     }
     
-    return await this.postfast.publishToMultiple(postsToPublish, publishOptions);
+    const result = await this.postfast.publishToMultiple(postsToPublish, publishOptions);
+
+    // Increment publish counters for statistics tracking
+    if (result.stats?.successful > 0) {
+      await this.incrementPublishCounters(result.stats.successful);
+    }
+
+    return result;
+  }
+
+  /**
+   * Increment publish counters for today, this week, and this month
+   */
+  async incrementPublishCounters(count) {
+    try {
+      await Promise.all([
+        StorageUtils.increment(this.storage, STORAGE_KEYS.POSTS_PUBLISHED_TODAY, count),
+        StorageUtils.increment(this.storage, STORAGE_KEYS.POSTS_PUBLISHED_WEEK, count),
+        StorageUtils.increment(this.storage, STORAGE_KEYS.POSTS_PUBLISHED_MONTH, count),
+      ]);
+    } catch (error) {
+      log.warn('Failed to increment publish counters', error);
+    }
   }
 
   /**
@@ -314,7 +340,7 @@ class SocialWorkflow {
     }
     
     // Store pending approvals
-    await this.storage.set('pending_approvals', approvalRequests);
+    await this.storage.set(STORAGE_KEYS.PENDING_APPROVALS, approvalRequests);
     
     return {
       success: true,
@@ -349,7 +375,7 @@ class SocialWorkflow {
     }
     
     // Store drafts
-    await this.storage.set('drafts', drafts);
+    await this.storage.set(STORAGE_KEYS.DRAFTS, drafts);
     
     // Send drafts to Telegram if chat ID provided
     if (options.chatId) {
@@ -402,17 +428,16 @@ class SocialWorkflow {
       await this.storage.set(key, result);
       
       // Also update recent workflows list
-      const recentKey = 'recent_workflows';
-      const recent = await this.storage.get(recentKey) || [];
+      const recent = await this.storage.get(STORAGE_KEYS.RECENT_WORKFLOWS) || [];
       recent.unshift({
         workflowId: result.workflowId,
         timestamp: result.endTime,
         success: result.success,
         stats: result.stats,
       });
-      
+
       // Keep only last 50 workflows
-      await this.storage.set(recentKey, recent.slice(0, 50));
+      await this.storage.set(STORAGE_KEYS.RECENT_WORKFLOWS, recent.slice(0, 50));
       
     } catch (error) {
       log.warn('Failed to store workflow result', error);

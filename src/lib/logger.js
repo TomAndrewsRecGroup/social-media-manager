@@ -9,7 +9,7 @@ class Logger {
   constructor(module = 'System') {
     this.module = module;
     this.enabled = config.modes.enableLogging;
-    this.debug = config.debug;
+    this.debugMode = config.debug;
   }
 
   /**
@@ -79,7 +79,7 @@ class Logger {
    * Log debug message (only in debug mode)
    */
   debug(message, data = null) {
-    if (!this.debug) return;
+    if (!this.debugMode) return;
     console.log(this.formatMessage('DEBUG', message, data));
   }
 

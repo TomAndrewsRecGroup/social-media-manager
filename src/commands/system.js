@@ -186,15 +186,15 @@ class SystemCommands {
       
       let message = '🌐 *Platform Status*\n\n';
       
-      for (const [platform, config] of Object.entries(config.content.platforms)) {
+      for (const [platform, platformCfg] of Object.entries(config.content.platforms)) {
         const customSettings = platformSettings[platform] || {};
-        const enabled = customSettings.enabled !== undefined 
-          ? customSettings.enabled 
-          : config.enabled;
-        
+        const enabled = customSettings.enabled !== undefined
+          ? customSettings.enabled
+          : platformCfg.enabled;
+
         message += `*${platform}:* ${enabled ? '✅' : '❌'}\n`;
-        message += `• Max length: ${config.maxLength}\n`;
-        message += `• Hashtag limit: ${config.hashtagLimit}\n\n`;
+        message += `• Max length: ${platformCfg.maxLength}\n`;
+        message += `• Hashtag limit: ${platformCfg.hashtagLimit}\n\n`;
       }
       
       return message;

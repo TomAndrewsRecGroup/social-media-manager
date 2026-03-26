@@ -6,14 +6,14 @@
 import config from '../config/index.js';
 import logger from '../lib/logger.js';
 import { researchTopicSchema } from '../lib/validators.js';
-import StorageService from '../services/storage.js';
+import StorageService, { STORAGE_KEYS } from '../services/storage.js';
 
 const log = logger.child('TopicSelector');
 
 class TopicSelector {
   constructor() {
     this.storage = new StorageService();
-    this.recentTopicsKey = 'recent_topics';
+    this.recentTopicsKey = STORAGE_KEYS.RECENT_TOPICS;
     this.topicHistoryDays = 7; // Look back 7 days for duplication check
   }
 
